@@ -134,8 +134,15 @@ Issue 1
     5. I got rid of the incorrecct operator as "for song in songs" is all that is needed for this function. I saw that there was only one api that uses this function.
 
 Issue 2
-    1. Bug My listening streak keeps resetting 
+    1. Bug #1 My listening streak keeps resetting 
     2. I reproduced this bug by running the pytest /tests suite and I saw that on Sundays specifically the streak is reset.
     3. I saw that the test specifically  calls the functions from the streak_service.py services file and investigated the record_listening_event() function and this called update_listenting_streak() function. There, I saw a snippit of code that is seemingly left in by mistake and had no purpose being there.
     4. There, I saw a snippit of code that is seemingly left in by mistake and had no purpose being there.
     5. I deleted this extraneous portion of code "today.weekday() != 6" and checked all the routes that use this function and saw that only one function uses this service, so I tested it thoroughly.
+
+Issue 3
+    1. Bug #3 Friends Listening Now shows people from yesterday
+    2. I reproduced this bug by running the /feed/<user-id>/listening-now curl command and seeing that listened_at was stale and from many hours ago not now.
+    3. I saw that the logic heavily relied on the feed_service.py service file and looked into it further. I saw that the cutoff date was 24 hours from the time the service is being processed.
+    4. The 24 hour threshold doesn't make much sense since the function is called friends_listening_now() and yesterday is hardly current.
+    5. For the fix I decided to make the threshold as 30 minutes ago instead of 24 hours. This will mean that users listening now will be reflected as much more recent. I then tested the /listening_now api again and saw that it is working better.

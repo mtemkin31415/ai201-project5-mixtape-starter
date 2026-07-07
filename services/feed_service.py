@@ -10,7 +10,7 @@ from app import db
 from models import User, Song, ListeningEvent
 
 
-RECENT_THRESHOLD = timedelta(hours=24)
+RECENT_THRESHOLD = timedelta(minutes=30)
 
 
 def get_friends_listening_now(user_id: str) -> list[dict]:
@@ -39,7 +39,7 @@ def get_friends_listening_now(user_id: str) -> list[dict]:
         db.session.query(ListeningEvent)
         .filter(
             ListeningEvent.user_id.in_(friend_ids),
-            ListeningEvent.listened_at >= cutoff, # bug probably should be < instead?
+            ListeningEvent.listened_at >= cutoff, 
         )
         .order_by(desc(ListeningEvent.listened_at))
         .all()
