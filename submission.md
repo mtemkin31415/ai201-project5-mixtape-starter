@@ -1,3 +1,55 @@
+## AI Usage
+
+I used Claude Code (Anthropic's CLI) as a pair-debugging partner throughout this
+project. I drove the investigation with specific questions and made the final calls on
+what counted as a bug and how to fix it — the AI's role was to read code faster than I
+could, explain unfamiliar mechanics, and pressure-test my reasoning before I committed
+to a change.
+
+**Getting the app running.** My first blocker was that
+`FLASK_APP=app:create_app flask run` did nothing. The AI reproduced it and identified
+the cause: that's Bash syntax, and I was in PowerShell, where you can't set an inline
+environment variable that way. It gave me the PowerShell form
+(`$env:FLASK_APP = "app:create_app"; flask run`) and noted that Flask auto-discovers
+`app.py`, so plain `flask run` works too.
+
+**Understanding the 404 at `/`.** When the root URL returned 404, the AI dumped the
+full URL map and explained that this is a pure JSON API — every blueprint is mounted
+under a prefix (`/songs`, `/playlists`, …) and there's deliberately no index route, so
+a 404 at `/` is expected rather than a bug. It pointed me at real GET endpoints to try.
+
+**Mapping the codebase.** I had the AI read every source file and produce the codebase
+map below. I used it to get oriented quickly — especially the routes→services layering
+and the `playlist_entries` join table's extra `position`/`added_by` columns, which
+turned out to be relevant to two of the bugs.
+
+**Learning to exercise the API.** I asked how to hit the endpoints from the command
+line. The AI flagged the Windows gotcha that `curl` is an alias for
+`Invoke-WebRequest` (different flags) and gave me both the real `curl.exe` form and the
+cleaner `Invoke-RestMethod` form, using real seeded IDs so the requests actually ran.
+
+**Narrowing down bugs.** This is where the AI helped most:
+
+- *Streak reset (Bug #1):* I pointed at `today.weekday() != 6` and asked whether it had
+  any purpose. The AI explained that `weekday()` returns 0=Mon … 6=Sun, so the clause
+  silently sends any consecutive-day listen that lands on a **Sunday** into the `else`
+  branch, resetting the streak to 1. It confirmed nothing in the docstring, models, or
+  routes justified the clause, so I was safe to delete it.
+- *Stale feed dates (Bug #2):* I reported that `/listening-now` returned old
+  timestamps. The AI traced the `desc()` ordering and the cutoff filter, and talked me
+  *out* of flipping `>=` to `<` (a misleading in-code comment suggested it) — that would
+  have been wrong. It helped me see the real culprit was the 24-hour `RECENT_THRESHOLD`
+  being far too wide for a "listening **now**" feed.
+- *Interpreting the data:* when I pasted a raw `ListeningEvent` next to the feed output,
+  the AI spotted that the "stale" date was actually `User.last_listened_at` (a cached
+  column) diverging from the event log, and traced it to the seed script setting the two
+  values independently. That sharpened my understanding of which value was authoritative
+  and confirmed the feed query itself was sound once the threshold was fixed.
+- *Timezone question:* I asked how the DB stores dates. The AI explained SQLite stores
+  them as **naive UTC** strings (the plain `DateTime` column drops tzinfo on write),
+  which is exactly why `streak_service` re-attaches `timezone.utc` on read before doing
+  date math.
+
 # Mixtape — Codebase Map
 
 Mixtape is a **JSON REST API** (no HTML frontend) for sharing songs with friends,
@@ -124,33 +176,82 @@ in the same transaction. Those same events are what `feed_service` reads back to
 
 
 
-Root Cause Analysis:
+## Root Cause Analysis
 
-Issue 1
-    1. Bug #5: I got notified when a friend added my song to a playlist but not when they rated it
-    2. I reproduced this bug by looking at the pytest tests/ suite and I saw that the bug was revealed in one of the test cases surrounding the show_songs() function.
-    3. I found the root cause by seeing the logic flowing into the search_songs() function and looking at the code in the function. I saw that it was erroneously getting rid of the last song.
-    4. The root cause came from the use of the [:-1] slice operator in python, this is an incorrect use of the operator and is not necessary for this use case.
-    5. I got rid of the incorrecct operator as "for song in songs" is all that is needed for this function. I saw that there was only one api that uses this function.
+### Issue 1 — Bug #5: A playlist is missing its last song
 
-Issue 2
-    1. Bug #1 My listening streak keeps resetting 
-    2. I reproduced this bug by running the pytest /tests suite and I saw that on Sundays specifically the streak is reset.
-    3. I saw that the test specifically  calls the functions from the streak_service.py services file and investigated the record_listening_event() function and this called update_listenting_streak() function. There, I saw a snippit of code that is seemingly left in by mistake and had no purpose being there.
-    4. There, I saw a snippit of code that is seemingly left in by mistake and had no purpose being there.
-    5. I deleted this extraneous portion of code "today.weekday() != 6" and checked all the routes that use this function and saw that only one function uses this service, so I tested it thoroughly.
+1. **Symptom.** A playlist that should contain N songs comes back from
+   `GET /playlists/<id>/songs` with only N−1 — the final song is always missing.
+2. **Reproduction.** The `tests/test_playlists.py` suite exposed it directly:
+   `test_playlist_returns_all_songs` seeds a 5-song playlist and asserts
+   `len(songs) == 5`, but the call returned 4 (the test even flags `# Bug causes this to
+   return 4`).
+3. **Locating it.** The route delegates to `get_playlist_songs()` in
+   `services/playlist_service.py`. The query itself was correct — it joined
+   `playlist_entries` and ordered by `position` — so the problem had to be in how the
+   results were returned.
+4. **Root cause.** The final line sliced the list before serializing:
+   `return [song.to_dict() for song in songs[:-1]]`. The `[:-1]` slice drops the last
+   element of the ordered list, so the last song by position was silently discarded.
+   Nothing in the docstring ("returns all songs") called for it.
+5. **Fix.** Removed the slice — `return [song.to_dict() for song in songs]`. This is the
+   only endpoint that uses the function, and the two `test_playlists.py` cases
+   (count and ordering) now pass, with the empty-playlist case still returning `[]`.
 
-Issue 3
-    1. Bug #2 Friends Listening Now shows people from yesterday
-    2. I reproduced this bug by running the /feed/<user-id>/listening-now curl command and seeing that listened_at was stale and from many hours ago not now.
-    3. I saw that the logic heavily relied on the feed_service.py service file and looked into it further. I saw that the cutoff date was 24 hours from the time the service is being processed.
-    4. The 24 hour threshold doesn't make much sense since the function is called friends_listening_now() and yesterday is hardly current.
-    5. For the fix I decided to make the threshold as 30 minutes ago instead of 24 hours. This will mean that users listening now will be reflected as much more recent. I then tested the /listening_now api again and saw that it is working better.
+### Issue 2 — Bug #1: My listening streak keeps resetting
 
-Issue 4
-    1. Bug #4 I got notified when a friend added my song to a playlist but not when they rated it
-    2. I reproduced the bug by following the suggest curl commands like POST <song_id>/rate then checking  <user-id>/notifications to check for the corresponding notification
-    3. I saw that the add_to_playlist function that is called has a section that sends a notification to the user that shared the song. When checking the rate_song() function I saw that there was no logic to send out a .
-    4. I saw that the logic to send out another notification simply didn't exist.
-    5. I fixed this by adding the logic to send out a notification to the sharing user when the song is rated and only if the sharer is not the user that rated the song. I then tested the changes and saw that when a user shared a song the now get notification when they another user rates it.
-    
+1. **Symptom.** A user's `listening_streak` resets to 1 even when they listened on
+   consecutive days, seemingly at random.
+2. **Reproduction.** Running the `tests/` suite showed the reset happened specifically
+   when the qualifying listen fell on a **Sunday**.
+3. **Locating it.** The failing test calls into `streak_service.py`:
+   `record_listening_event()` → `update_listening_streak()`. The consecutive-day branch
+   was `elif days_since_last == 1 and today.weekday() != 6:`.
+4. **Root cause.** `datetime.weekday()` returns 0 for Monday through 6 for Sunday, so
+   `!= 6` means "today is not Sunday." When a genuine consecutive-day listen lands on a
+   Sunday, that condition is false, control falls through to the `else`, and the streak
+   is reset to 1 instead of incremented. The clause is unjustified — the documented
+   streak rules and the rest of the app treat all days identically, so it was a
+   planted/leftover condition with no purpose.
+5. **Fix.** Deleted the weekday clause, leaving `elif days_since_last == 1:`. Only
+   `record_listening_event()` calls this function, so I verified the four documented
+   cases (first listen, same day, consecutive day, gap > 1 day) behave correctly.
+
+### Issue 3 — Bug #2: "Friends Listening Now" shows people from yesterday
+
+1. **Symptom.** `GET /feed/<user_id>/listening-now` returned friends whose most recent
+   listen was hours ago, not people currently listening.
+2. **Reproduction.** Hitting the endpoint and inspecting `listened_at` on the results
+   showed timestamps many hours old rather than within the last few minutes.
+3. **Locating it.** The logic lives in `get_friends_listening_now()` in
+   `feed_service.py`. The ordering (`desc(listened_at)`) and dedup (most-recent event per
+   friend) were correct; the recency filter used a module constant
+   `RECENT_THRESHOLD = timedelta(hours=24)` as the cutoff.
+4. **Root cause.** A 24-hour window is far too wide for a "listening **now**" feed. The
+   seed data makes this concrete: it creates "older" events 2, 10, and 18 hours ago
+   (commented as events that should *not* appear) — all of which fall inside 24 hours and
+   so leaked into the feed, alongside the genuinely recent events from ~10–20 minutes
+   ago. (Note: the comparison operator `>=` is actually correct — a misleading in-code
+   comment suggested flipping it to `<`, which would have returned only *stale* events.
+   The bug was the threshold *value*, not the operator.)
+5. **Fix.** Narrowed `RECENT_THRESHOLD` to `timedelta(minutes=30)`, matching the seed's
+   intent that only sub-30-minute events count as "listening now." Re-hitting the
+   endpoint, only the recent events remain and the older ones are correctly excluded.
+
+### Issue 4 — Bug #4: I got notified when a friend added my song to a playlist, but not when they rated it
+
+1. **Symptom.** Sharing-related notifications fired for playlist adds but never for
+   ratings — the sharer got nothing when someone rated their song.
+2. **Reproduction.** `POST /songs/<song_id>/rate` as a different user, then
+   `GET /users/<sharer_id>/notifications` — no `song_rated` notification appeared, while
+   the equivalent playlist-add flow did produce one.
+3. **Locating it.** Both actions live in `notification_service.py`. `add_to_playlist()`
+   ends with a `create_notification()` call guarded by `song.shared_by != added_by`.
+   `rate_song()` had no such call at all.
+4. **Root cause.** The notification step was simply never implemented on the rating
+   path — an omission, not a broken condition.
+5. **Fix.** Added a `create_notification()` call to `rate_song()`, mirroring the playlist
+   flow: it fires only when `song.shared_by != user_id` (so you're never notified about
+   rating your own song), with type `"song_rated"` and a body naming the rater, song, and
+   score. Verified end-to-end that the sharer now receives a notification when another
+   user rates their song, and that self-ratings produce none.
