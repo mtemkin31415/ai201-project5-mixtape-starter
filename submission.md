@@ -121,10 +121,21 @@ in the same transaction. Those same events are what `feed_service` reads back to
   `lazy="dynamic"` (so it can be queried/filtered), while `Song.tags` and
   `Playlist.songs` use `lazy="subquery"` for eager loading.
 
-## Observations / suspected bugs
-
-This is the `bugfix/mixtape` branch, and while mapping the code I noticed several
-places where the implementation contradicts the documented intent:
 
 
 
+Root Cause Analysis:
+
+Issue 1
+    1. Bug #5: I got notified when a friend added my song to a playlist but not when they rated it
+    2. I reproduced this bug by looking at the pytest tests/ suite and I saw that the bug was revealed in one of the test cases surrounding the show_songs() function.
+    3. I found the root cause by seeing the logic flowing into the search_songs() function and looking at the code in the function. I saw that it was erroneously getting rid of the last song.
+    4. The root cause came from the use of the [:-1] slice operator in python, this is an incorrect use of the operator and is not necessary for this use case.
+    5. I got rid of the incorrecct operator as "for song in songs" is all that is needed for this function. I saw that there was only one api that uses this function.
+
+Issue 2
+    1. Bug My listening streak keeps resetting 
+    2. I reproduced this bug by running the pytest /tests suite and I saw that on Sundays specifically the streak is reset.
+    3. I saw that the test specifically  calls the functions from the streak_service.py services file and investigated the record_listening_event() function and this called update_listenting_streak() function. There, I saw a snippit of code that is seemingly left in by mistake and had no purpose being there.
+    4. There, I saw a snippit of code that is seemingly left in by mistake and had no purpose being there.
+    5. I deleted this extraneous portion of code "today.weekday() != 6" and checked all the routes that use this function and saw that only one function uses this service, so I tested it thoroughly.
