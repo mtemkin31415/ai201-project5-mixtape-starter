@@ -86,7 +86,7 @@ pytest tests/
 | # | Title | Affected service |
 |---|-------|-----------------|
 | /1 | My listening streak keeps resetting | `streak_service.py` |
-| 2 | Friends Listening Now shows people from yesterday | `feed_service.py` |
+| /2 | Friends Listening Now shows people from yesterday | `feed_service.py` |
 | /3 | The same song keeps showing up twice in search | `search_service.py` |
 | 4 | I got notified when a friend added my song to a playlist but not when they rated it | `notification_service.py` |
 | /5 | The last song in a playlist never shows up | `playlist_service.py` |

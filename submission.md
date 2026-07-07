@@ -141,8 +141,16 @@ Issue 2
     5. I deleted this extraneous portion of code "today.weekday() != 6" and checked all the routes that use this function and saw that only one function uses this service, so I tested it thoroughly.
 
 Issue 3
-    1. Bug #3 Friends Listening Now shows people from yesterday
+    1. Bug #2 Friends Listening Now shows people from yesterday
     2. I reproduced this bug by running the /feed/<user-id>/listening-now curl command and seeing that listened_at was stale and from many hours ago not now.
     3. I saw that the logic heavily relied on the feed_service.py service file and looked into it further. I saw that the cutoff date was 24 hours from the time the service is being processed.
     4. The 24 hour threshold doesn't make much sense since the function is called friends_listening_now() and yesterday is hardly current.
     5. For the fix I decided to make the threshold as 30 minutes ago instead of 24 hours. This will mean that users listening now will be reflected as much more recent. I then tested the /listening_now api again and saw that it is working better.
+
+Issue 4
+    1. Bug #4 I got notified when a friend added my song to a playlist but not when they rated it
+    2. I reproduced the bug by following the suggest curl commands like POST <song_id>/rate then checking  <user-id>/notifications to check for the corresponding notification
+    3. I saw that the add_to_playlist function that is called has a section that sends a notification to the user that shared the song. When checking the rate_song() function I saw that there was no logic to send out a .
+    4. I saw that the logic to send out another notification simply didn't exist.
+    5. I fixed this by adding the logic to send out a notification to the sharing user when the song is rated and only if the sharer is not the user that rated the song. I then tested the changes and saw that when a user shared a song the now get notification when they another user rates it.
+    
