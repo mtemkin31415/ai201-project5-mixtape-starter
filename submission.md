@@ -255,3 +255,14 @@ in the same transaction. Those same events are what `feed_service` reads back to
    rating your own song), with type `"song_rated"` and a body naming the rater, song, and
    score. Verified end-to-end that the sharer now receives a notification when another
    user rates their song, and that self-ratings produce none.
+
+
+git log --oneline ouput:
+(.venv) C:\Users\mtemk\CodePath Ai201\ai201-project5-mixtape-starter>git log --oneline
+28e5d7b (HEAD -> bugfix/mixtape, origin/bugfix/mixtape) Finished project
+d33f5e8 Fixed Bug #4 No notifs when rating
+d1ee43d Fixed Bug #2: Removed Listeing_now is not recent
+ea06836 Fixed Bug #3: Erased extraneous code
+6009c98 Fixed Issue 5:  Last Playlist song is dropped
+2dfdeaa (origin/main, origin/HEAD, main) Add .gitignore file and update README with setup instructions
+7b64551 initial commit
